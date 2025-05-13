@@ -146,13 +146,24 @@ export const saveGameResult = async (result: {
       await teamsSheet.loadHeaderRow();
       const rows = await teamsSheet.getRows();
       console.log(`Found ${rows.length} team rows`);
-      const teamRowIndex = rows.findIndex(
-        (row) => row.get('id') === result.teamId
-      );
-      console.log(`Team row index for team ${result.teamId}: ${teamRowIndex}`);
       
-      if (teamRowIndex !== -1) {
-        const teamRow = rows[teamRowIndex];
+      // Check headers to identify the proper field names
+      const headers = teamsSheet.headerValues;
+      console.log(`Sheet headers: ${headers.join(', ')}`);
+      
+      // Try to find the team using teamId first (primary approach)
+      let teamRow = rows.find(row => row.get('teamId') === result.teamId);
+      let idFieldUsed = 'teamId';
+      
+      // Fallback to id if teamId didn't find a match
+      if (!teamRow) {
+        console.log(`Team not found with 'teamId' field, trying 'id' field`);
+        teamRow = rows.find(row => row.get('id') === result.teamId);
+        idFieldUsed = 'id';
+      }
+      
+      if (teamRow) {
+        console.log(`Found team with ${idFieldUsed} ${result.teamId}`);
         const previousScore = parseInt(teamRow.get('points') || '0', 10);
         const newScore = previousScore + result.points;
         console.log(`Updating team score from ${previousScore} to ${newScore}`);
