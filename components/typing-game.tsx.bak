@@ -1,0 +1,384 @@
+"use client"
+
+import type React from "react"
+
+import { useState, useEffect, useCallback, useRef } from "react"
+import { motion } from "framer-motion"
+import { TeamSelector } from "@/components/team-selector"
+import { TypingTest } from "@/components/typing-test"
+import { Results } from "@/components/results"
+import { HomeButton } from "@/components/home-button"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
+import { Leaderboard } from "@/components/leaderboard"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
+import { fetchLeaderboard, saveResult } from "@/lib/api-client"
+
+// Define team types
+export type Team = {
+  id: string
+  name: string
+  color: string
+  points: number
+  history: GameResult[]
+}
+
+// Define result types
+export type TestResult = {
+  wordsTyped: number
+  correctWords: number
+  accuracy: number
+  wpm: number
+  points: number
+  teamId: string
+  username: string
+}
+
+// Define game result for history
+export type GameResult = {
+  date: string
+  wordsTyped: number
+  correctWords: number
+  accuracy: number
+  wpm: number
+  points: number
+  username: string
+}
+
+// Initial team data
+const initialTeams: Team[] = [
+  { id: "yellow", name: "Yellow Team", color: "bg-yellow-500", points: 0, history: [] },
+  { id: "blue", name: "Blue Team", color: "bg-blue-600", points: 0, history: [] },
+  { id: "green", name: "Green Team", color: "bg-green-600", points: 0, history: [] },
+]
+
+export function TypingGame() {
+  // Use refs to avoid unnecessary renders
+  const initialDataLoadedRef = useRef(false)
+  const resultSavedRef = useRef(false)
+  
+  // Game states that trigger renders
+  const [gameState, setGameState] = useState<"select" | "play" | "results">("select")
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null)
+  const [testResult, setTestResult] = useState<TestResult | null>(null)
+  const [teams, setTeams] = useState<Team[]>(initialTeams)
+  const [username, setUsername] = useState("")
+  const [usernameError, setUsernameError] = useState("")
+  const [savedUsername, setSavedUsername] = useState("")
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+
+  // Load teams data only once on initial render
+  useEffect(() => {
+    // Guard against multiple loads
+    if (initialDataLoadedRef.current) return;
+    
+    // Mark as loaded to prevent duplicate loads
+    initialDataLoadedRef.current = true;
+    
+    // Fetch teams data from API
+    const loadTeamsData = async () => {
+      try {
+        const teamsData = await fetchLeaderboard();
+        if (teamsData && teamsData.length > 0) {
+          // Make sure each team has a history array
+          const formattedTeams = teamsData.map((team: any) => ({
+            ...team,
+            history: team.history || []
+          }));
+          setTeams(formattedTeams);
+        }
+      } catch (error) {
+        console.error('Failed to fetch teams data:', error);
+        // If API fails, use initial teams
+        setTeams(initialTeams);
+      }
+    };
+    
+    // Load data in parallel
+    loadTeamsData();
+    
+    // Load previously used username
+    const storedUsername = localStorage.getItem("typingGameUsername")
+    if (storedUsername) {
+      setUsername(storedUsername)
+      setSavedUsername(storedUsername)
+    }
+    
+    // No cleanup needed
+  }, []) // Empty deps = run once on mount
+
+  // Handle username change
+  const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUsername(e.target.value)
+    setUsernameError("")
+  }
+
+  // Handle start game - implemented as a memoized callback
+  const handleStartGame = useCallback(() => {
+    // Validate username
+    if (!username.trim()) {
+      setUsernameError("Please enter your name");
+      return;
+    }
+
+    // Save username to local storage
+    const trimmedUsername = username.trim();
+    localStorage.setItem("typingGameUsername", trimmedUsername);
+    setSavedUsername(trimmedUsername);
+    setUsernameError("");
+
+    // Start game
+    setGameState("play");
+  }, [username]);
+
+  // Handle game completion - implemented as a memoized callback
+  const handleGameComplete = useCallback(async (result: TestResult) => {
+    // Set result state
+    setTestResult(result);
+    
+    // Reset save flag
+    resultSavedRef.current = false;
+    
+    // Create a game history entry 
+    const gameResult: GameResult = {
+      date: new Date().toISOString(),
+      wordsTyped: result.wordsTyped,
+      correctWords: result.correctWords,
+      accuracy: result.accuracy,
+      wpm: result.wpm,
+      points: result.points,
+      username: savedUsername,
+    };
+    
+    // Create the payload for the API
+    const finalResult = {
+      teamId: selectedTeam?.id as string,
+      wordsTyped: result.wordsTyped,
+      correctWords: result.correctWords,
+      accuracy: result.accuracy,
+      wpm: result.wpm,
+      points: result.points,
+      username: savedUsername,
+    };
+    
+    // Update local team state for immediate UI feedback
+    setTeams(currentTeams => 
+      currentTeams.map(team => 
+        team.id === selectedTeam?.id
+          ? {
+              ...team,
+              points: team.points + finalResult.points,
+              history: [...team.history, gameResult],
+            }
+          : team
+      )
+    );
+    
+    // Save to Google Sheets if not already saved
+    if (!resultSavedRef.current) {
+      try {
+        await saveResult(finalResult);
+        resultSavedRef.current = true;
+        console.log('Game result saved to Google Sheets successfully');
+      } catch (error) {
+        console.error('Failed to save game result to Google Sheets:', error);
+      }
+    }
+    
+    // Finally, update game state
+    setGameState("results");
+  }, [selectedTeam, savedUsername]);
+
+  // Handle play again - implemented as a memoized callback
+  const handlePlayAgain = useCallback(async () => {
+    // Reset flags
+    resultSavedRef.current = false;
+    
+    // Reset result state
+    setTestResult(null);
+    
+    // Define an inner function to avoid state closure issues
+    const refreshData = async () => {
+      try {
+        const refreshedTeams = await fetchLeaderboard();
+        if (refreshedTeams && refreshedTeams.length > 0) {
+          // Make sure each team has a history array
+          const formattedTeams = refreshedTeams.map((team: any) => ({
+            ...team,
+            history: team.history || []
+          }));
+          setTeams(formattedTeams);
+        }
+      } catch (error) {
+        console.error('Failed to refresh teams data:', error);
+      }
+    };
+    
+    // Refresh data and reset the game state
+    await refreshData();
+    setGameState("select");
+  }, []);
+
+  // Handle home button click - implemented as a memoized callback
+  const handleHomeClick = useCallback(() => {
+    if (gameState === "play") {
+      setShowConfirmDialog(true);
+    } else {
+      // For any state other than 'play', go home directly
+      setGameState("select");
+      setSelectedTeam(null);
+      setTestResult(null);
+    }
+  }, [gameState]);
+
+  return (
+    <div className="space-y-8">
+      {/* Home button - visible on all pages */}
+      {gameState !== "select" && <HomeButton onClick={handleHomeClick} />}
+      
+      {/* Confirm dialog */}
+      {showConfirmDialog && (
+        <AlertDialog
+          leastDestructiveRef={null}
+          isOpen={showConfirmDialog}
+          onClose={() => setShowConfirmDialog(false)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm</AlertDialogTitle>
+            </AlertDialogHeader>
+            <AlertDialogDescription>
+              Are you sure you want to return to the home page? Your current game progress will be lost.
+            </AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogAction onClick={() => setShowConfirmDialog(false)}>Cancel</AlertDialogAction>
+              <AlertDialogAction onClick={() => {
+                setShowConfirmDialog(false);
+                setGameState("select");
+                setSelectedTeam(null);
+              }}>Confirm</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+      
+      {/* Select team */}
+      {gameState === "select" && (
+        <motion.div
+          key="select"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+          className="space-y-8"
+        >
+      <AnimatePresence mode="wait">
+        {gameState === "select" && (
+          <motion.div
+            key="select"
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="space-y-8"
+          >
+            <motion.div variants={itemVariants}>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Join Mr C's Typing Challenge</CardTitle>
+                  <CardDescription>Enter your name and choose your team</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="username">Your Name</Label>
+                    <Input
+                      id="username"
+                      placeholder="Enter your name"
+                      value={username}
+                      onChange={handleUsernameChange}
+                      className={usernameError ? "border-red-500" : ""}
+                    />
+                    {usernameError && (
+                      <motion.p
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="text-sm text-red-500"
+                      >
+                        {usernameError}
+                      </motion.p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Select Your Team</Label>
+                    <TeamSelector teams={teams} selectedTeam={selectedTeam} onSelectTeam={handleTeamSelect} />
+                  </div>
+                </CardContent>
+                <CardFooter>
+                  <motion.button
+                    onClick={handleStartGame}
+                    disabled={!selectedTeam}
+                    className="w-full p-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    Start Typing Challenge
+                  </motion.button>
+                </CardFooter>
+              </Card>
+            </motion.div>
+
+            <motion.div variants={itemVariants}>
+              <Leaderboard teams={teams} />
+            </motion.div>
+          </motion.div>
+        )}
+
+        {gameState === "play" && selectedTeam && (
+          <motion.div
+            key="play"
+            initial={{ opacity: 0, x: 100 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -100 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+          >
+            <TypingTest team={selectedTeam} onComplete={handleGameComplete} duration={30} username={savedUsername} />
+          </motion.div>
+        )}
+
+        {gameState === "results" && testResult && (
+          <motion.div
+            key="results"
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="space-y-8"
+          >
+            <motion.div variants={itemVariants}>
+              <Results result={testResult} team={selectedTeam} />
+            </motion.div>
+
+            <motion.div variants={itemVariants}>
+              <Leaderboard teams={teams} />
+            </motion.div>
+
+            <motion.div variants={itemVariants} className="flex justify-center">
+              <motion.button
+                onClick={handlePlayAgain}
+                className="p-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Play Again
+              </motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
