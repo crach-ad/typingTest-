@@ -7,7 +7,27 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
+    console.log('API route /api/results called');
+    
+    // Verify environment variables are available in this context
+    const envCheck = {
+      hasServiceAccountEmail: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      hasPrivateKey: !!process.env.GOOGLE_PRIVATE_KEY,
+      hasSheetId: !!process.env.GOOGLE_SHEET_ID,
+      privateKeyLength: process.env.GOOGLE_PRIVATE_KEY?.length || 0,
+    };
+    console.log('Environment variables check:', envCheck);
+    
+    if (!envCheck.hasServiceAccountEmail || !envCheck.hasPrivateKey || !envCheck.hasSheetId) {
+      console.error('Missing required environment variables');
+      return NextResponse.json(
+        { success: false, error: 'Server configuration error: Missing Google Sheets credentials' },
+        { status: 500 }
+      );
+    }
+    
     const data = await request.json();
+    console.log('Received result data:', { teamId: data.teamId, username: data.username });
     
     // Validate required fields
     const requiredFields = ['teamId', 'username', 'wordsTyped', 'correctWords', 'accuracy', 'wpm', 'points'];

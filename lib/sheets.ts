@@ -16,21 +16,37 @@ const initializeGoogleSheets = async () => {
       throw new Error('Google Sheets API not configured');
     }
     
-    const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n') || '';
-    const sheetId = process.env.GOOGLE_SHEET_ID || '';
+    const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+    const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    const sheetId = process.env.GOOGLE_SHEET_ID;
 
-    const jwt = new JWT({
-      email: serviceAccountEmail || '',
-      key: privateKey,
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    console.log('Initializing Google Sheets with:', {
+      clientEmail,
+      sheetId,
+      privateKeyLength: privateKey ? privateKey.length : 0
     });
 
+    if (!privateKey || !clientEmail || !sheetId) {
+      throw new Error("Missing Google Sheets credentials");
+    }
+
+    const jwt = new JWT({
+      email: clientEmail,
+      key: privateKey.replace(/\\n/g, "\n"),
+      scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+    });
+
+    console.log('JWT created, loading spreadsheet info');
     const doc = new GoogleSpreadsheet(sheetId, jwt);
     await doc.loadInfo();
+    console.log(`Spreadsheet loaded: ${doc.title}, sheets: ${Object.keys(doc.sheetsByTitle).join(', ')}`);
     return doc;
   } catch (error) {
-    console.error('Error initializing Google Sheets:', error);
+    console.error("Error initializing Google Sheets:", error);
+    if (error instanceof Error) {
+      console.error("Error message:", error.message);
+      console.error("Error stack:", error.stack);
+    }
     throw error;
   }
 };
@@ -72,7 +88,7 @@ export const saveGameResult = async (result: {
   date: string;
 }) => {
   try {
-    console.log('Starting Google Sheets saveGameResult...', { teamId: result.teamId, username: result.username });
+    console.log('Starting saveGameResult with data:', JSON.stringify(result));
     
     // Verify environment variables for debugging
     const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -98,16 +114,23 @@ export const saveGameResult = async (result: {
     }
     console.log('Results sheet found successfully');
     
-    await resultsSheet.addRow({
-      date: result.date,
-      teamId: result.teamId,
-      username: result.username,
-      wordsTyped: result.wordsTyped,
-      correctWords: result.correctWords,
-      accuracy: result.accuracy,
-      wpm: result.wpm,
-      points: result.points,
-    });
+    try {
+      console.log('Adding row to Results sheet');
+      await resultsSheet.addRow({
+        date: result.date,
+        teamId: result.teamId,
+        username: result.username,
+        wordsTyped: result.wordsTyped,
+        correctWords: result.correctWords,
+        accuracy: result.accuracy,
+        wpm: result.wpm,
+        points: result.points,
+      });
+      console.log('Result added to Results sheet successfully');
+    } catch (error) {
+      console.error('Error adding result to Results sheet:', error);
+      return { success: false, error };
+    }
     
     // 2. Update team points in the Teams sheet
     const teamsSheet = doc.sheetsByTitle['Teams'];
@@ -115,59 +138,91 @@ export const saveGameResult = async (result: {
       throw new Error('Teams sheet not found');
     }
     
-    // Load cells and get team rows
-    await teamsSheet.loadCells();
-    const rows = await teamsSheet.getRows();
-    const teamRow = rows.find(row => row.get('id') === result.teamId);
-    
-    // Update team points total with proper handling
-    if (teamRow) {
-      const currentPoints = parseInt(teamRow.get('points') || '0', 10);
-      const newTotalPoints = currentPoints + result.points;
-      teamRow.set('points', newTotalPoints.toString());
-      teamRow.set('lastUpdated', result.date); // Add timestamp for the update
-      await teamRow.save();
+    try {
+      console.log('Loading team cells');
+      await teamsSheet.loadCells();
       
-      // 3. Also add entry to the TeamHistory sheet (create if doesn't exist)
-      let teamHistorySheet = doc.sheetsByTitle['TeamHistory'];
-      if (!teamHistorySheet) {
-        // Create TeamHistory sheet if it doesn't exist
-        teamHistorySheet = await doc.addSheet({ 
-          title: 'TeamHistory',
-          headerValues: ['date', 'teamId', 'teamName', 'pointsAdded', 'newTotal', 'username']
-        });
-      } else {
-        // Ensure sheet has the correct headers
+      // Find the row index for the team
+      await teamsSheet.loadHeaderRow();
+      const rows = await teamsSheet.getRows();
+      console.log(`Found ${rows.length} team rows`);
+      const teamRowIndex = rows.findIndex(
+        (row) => row.get('id') === result.teamId
+      );
+      console.log(`Team row index for team ${result.teamId}: ${teamRowIndex}`);
+      
+      if (teamRowIndex !== -1) {
+        const teamRow = rows[teamRowIndex];
+        const previousScore = parseInt(teamRow.get('points') || '0', 10);
+        const newScore = previousScore + result.points;
+        console.log(`Updating team score from ${previousScore} to ${newScore}`);
+        
+        // Update the team score
+        teamRow.set('points', newScore.toString());
+        teamRow.set('lastUpdated', result.date); // Add timestamp for the update
         try {
-          await teamHistorySheet.loadHeaderRow();
-          const headers = teamHistorySheet.headerValues;
-          const requiredHeaders = ['date', 'teamId', 'teamName', 'pointsAdded', 'newTotal', 'username'];
-          
-          if (headers.length === 0 || requiredHeaders.some(h => !headers.includes(h))) {
-            await teamHistorySheet.setHeaderRow(requiredHeaders);
-          }
+          await teamRow.save();
+          console.log('Team score updated successfully');
         } catch (error) {
-          console.warn('Error checking TeamHistory headers, setting them now:', error);
-          await teamHistorySheet.setHeaderRow(['date', 'teamId', 'teamName', 'pointsAdded', 'newTotal', 'username']);
+          console.error("Error updating team score:", error);
+          return { success: false, error };
         }
+        
+        // 3. Also add entry to the TeamHistory sheet (create if doesn't exist)
+        let teamHistorySheet = doc.sheetsByTitle['TeamHistory'];
+        if (!teamHistorySheet) {
+          // Create TeamHistory sheet if it doesn't exist
+          teamHistorySheet = await doc.addSheet({ 
+            title: 'TeamHistory',
+            headerValues: ['date', 'teamId', 'teamName', 'pointsAdded', 'newTotal', 'username']
+          });
+        } else {
+          // Ensure sheet has the correct headers
+          try {
+            await teamHistorySheet.loadHeaderRow();
+            const headers = teamHistorySheet.headerValues;
+            const requiredHeaders = ['date', 'teamId', 'teamName', 'pointsAdded', 'newTotal', 'username'];
+            
+            if (headers.length === 0 || requiredHeaders.some(h => !headers.includes(h))) {
+              await teamHistorySheet.setHeaderRow(requiredHeaders);
+            }
+          } catch (error) {
+            console.warn('Error checking TeamHistory headers, setting them now:', error);
+            await teamHistorySheet.setHeaderRow(['date', 'teamId', 'teamName', 'pointsAdded', 'newTotal', 'username']);
+          }
+        }
+        
+        // Add the history entry to track changes
+        try {
+          await teamHistorySheet.addRow({
+            date: result.date,
+            teamId: result.teamId,
+            teamName: teamRow.get('name'),
+            pointsAdded: result.points,
+            newTotal: newScore,
+            username: result.username
+          });
+          console.log('Team history entry added successfully');
+        } catch (error) {
+          console.error('Error adding team history entry:', error);
+          return { success: false, error };
+        }
+      } else {
+        console.warn(`Team ${result.teamId} not found in Teams sheet`);
       }
-      
-      // Add the history entry to track changes
-      await teamHistorySheet.addRow({
-        date: result.date,
-        teamId: result.teamId,
-        teamName: teamRow.get('name'),
-        pointsAdded: result.points,
-        newTotal: newTotalPoints,
-        username: result.username
-      });
-    } else {
-      console.warn(`Team ${result.teamId} not found in Teams sheet`);
+    } catch (error) {
+      console.error("Error updating team score:", error);
+      return { success: false, error };
     }
     
+    console.log('Game result saved successfully');
     return { success: true };
   } catch (error) {
-    console.error('Error saving game result:', error);
+    console.error("Error saving game result:", error);
+    if (error instanceof Error) {
+      console.error("Error message:", error.message);
+      console.error("Error stack:", error.stack);
+    }
     return { success: false, error };
   }
 };
