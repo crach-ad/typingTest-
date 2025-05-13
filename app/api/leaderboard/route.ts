@@ -1,4 +1,8 @@
 import { NextResponse } from 'next/server';
+
+// Disable Edge Runtime to ensure compatibility with Google Sheets API
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 import { getLeaderboardData, isGoogleSheetsConfigured } from '@/lib/sheets';
 import { fallbackTeams } from '@/lib/fallback';
 

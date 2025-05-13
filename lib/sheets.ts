@@ -72,13 +72,31 @@ export const saveGameResult = async (result: {
   date: string;
 }) => {
   try {
+    console.log('Starting Google Sheets saveGameResult...', { teamId: result.teamId, username: result.username });
+    
+    // Verify environment variables for debugging
+    const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+    const sheetId = process.env.GOOGLE_SHEET_ID;
+    
+    console.log('Checking environment variables...', { 
+      hasEmail: !!serviceAccountEmail, 
+      hasKey: !!privateKey, 
+      hasSheetId: !!sheetId,
+      emailPrefix: serviceAccountEmail ? serviceAccountEmail.substring(0, 5) : 'missing',
+      keyLength: privateKey ? privateKey.length : 'missing'
+    });
+    
     const doc = await initializeGoogleSheets();
+    console.log('Google Sheets initialized successfully');
     
     // 1. Add result to the Results sheet
+    console.log('Locating Results sheet...');
     const resultsSheet = doc.sheetsByTitle['Results'];
     if (!resultsSheet) {
       throw new Error('Results sheet not found');
     }
+    console.log('Results sheet found successfully');
     
     await resultsSheet.addRow({
       date: result.date,

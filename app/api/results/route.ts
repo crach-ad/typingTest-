@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { saveGameResult, isGoogleSheetsConfigured } from '@/lib/sheets';
 
+// Disable Edge Runtime to ensure compatibility with Google Sheets API
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: Request) {
   try {
     const data = await request.json();
