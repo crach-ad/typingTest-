@@ -30,9 +30,23 @@ const initializeGoogleSheets = async () => {
       throw new Error("Missing Google Sheets credentials");
     }
 
+    let formattedKey = privateKey;
+    
+    // Replace escaped newlines with actual newlines
+    if (privateKey.includes('\\n')) {
+      formattedKey = privateKey.replace(/\\n/g, '\n');
+    }
+    
+    // Ensure the key has the proper header and footer if they're missing
+    if (!formattedKey.includes('-----BEGIN PRIVATE KEY-----')) {
+      formattedKey = `-----BEGIN PRIVATE KEY-----\n${formattedKey}\n-----END PRIVATE KEY-----`;
+    }
+    
+    console.log('Private key format prepared for JWT');
+
     const jwt = new JWT({
       email: clientEmail,
-      key: privateKey.replace(/\\n/g, "\n"),
+      key: formattedKey,
       scopes: ["https://www.googleapis.com/auth/spreadsheets"],
     });
 

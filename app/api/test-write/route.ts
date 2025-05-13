@@ -25,8 +25,18 @@ export async function GET() {
       });
     }
     
-    // Format the key correctly
-    const formattedKey = privateKey.replace(/\\n/g, '\n');
+    // Format the key properly for JWT
+    let formattedKey = privateKey;
+    
+    // Replace escaped newlines with actual newlines
+    if (privateKey.includes('\\n')) {
+      formattedKey = privateKey.replace(/\\n/g, '\n');
+    }
+    
+    // Ensure the key has the proper header and footer if they're missing
+    if (!formattedKey.includes('-----BEGIN PRIVATE KEY-----')) {
+      formattedKey = `-----BEGIN PRIVATE KEY-----\n${formattedKey}\n-----END PRIVATE KEY-----`;
+    }
     
     // Create JWT
     const jwt = new JWT({
