@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
-import { JWT } from 'google-auth-library';
+import * as googleAuth from '@/lib/google-auth';
 
 export const runtime = 'nodejs';
 
@@ -8,47 +8,24 @@ export async function GET() {
   try {
     console.log('Test write API route called');
     
-    // Get credentials from environment variables
-    const privateKey = process.env.GOOGLE_PRIVATE_KEY;
-    const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    const sheetId = process.env.GOOGLE_SHEET_ID;
-    
-    if (!privateKey || !clientEmail || !sheetId) {
+    // Check that credentials are configured
+    if (!process.env.GOOGLE_PRIVATE_KEY || 
+        !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || 
+        !process.env.GOOGLE_SHEET_ID) {
       return NextResponse.json({ 
         success: false, 
         error: 'Missing credentials',
         available: {
-          privateKey: !!privateKey,
-          clientEmail: !!clientEmail,
-          sheetId: !!sheetId
+          privateKey: !!process.env.GOOGLE_PRIVATE_KEY,
+          clientEmail: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+          sheetId: !!process.env.GOOGLE_SHEET_ID
         }
       });
     }
     
-    // Format the key properly for JWT
-    let formattedKey = privateKey;
-    
-    // Replace escaped newlines with actual newlines
-    if (privateKey.includes('\\n')) {
-      formattedKey = privateKey.replace(/\\n/g, '\n');
-    }
-    
-    // Ensure the key has the proper header and footer if they're missing
-    if (!formattedKey.includes('-----BEGIN PRIVATE KEY-----')) {
-      formattedKey = `-----BEGIN PRIVATE KEY-----\n${formattedKey}\n-----END PRIVATE KEY-----`;
-    }
-    
-    // Create JWT
-    const jwt = new JWT({
-      email: clientEmail,
-      key: formattedKey,
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-    
-    // Initialize the document
-    console.log('Connecting to sheet:', sheetId);
-    const doc = new GoogleSpreadsheet(sheetId, jwt);
-    await doc.loadInfo();
+    // Use our enhanced Google authentication module
+    console.log('Initializing Google Sheets with enhanced auth');
+    const doc = await googleAuth.initializeGoogleSheets();
     console.log('Connected to sheet:', doc.title);
     
     // Get the log sheet or create it

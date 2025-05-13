@@ -1,5 +1,5 @@
 import { GoogleSpreadsheet } from 'google-spreadsheet';
-import { JWT } from 'google-auth-library';
+import * as googleAuth from './google-auth';
 
 // Check if Google Sheets integration is configured
 export const isGoogleSheetsConfigured = (): boolean => {
@@ -16,45 +16,19 @@ const initializeGoogleSheets = async () => {
       throw new Error('Google Sheets API not configured');
     }
     
-    const privateKey = process.env.GOOGLE_PRIVATE_KEY;
-    const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    const sheetId = process.env.GOOGLE_SHEET_ID;
-
-    console.log('Initializing Google Sheets with:', {
-      clientEmail,
-      sheetId,
-      privateKeyLength: privateKey ? privateKey.length : 0
-    });
-
-    if (!privateKey || !clientEmail || !sheetId) {
-      throw new Error("Missing Google Sheets credentials");
+    // Use the enhanced implementation from google-auth.ts
+    // This improves compatibility with various environments including Vercel
+    try {
+      // This function handles all the complex authentication logic
+      return await googleAuth.initializeGoogleSheets();
+    } catch (error) {
+      console.error("Error initializing Google Sheets:", error);
+      if (error instanceof Error) {
+        console.error("Error message:", error.message);
+        console.error("Error stack:", error.stack);
+      }
+      throw error;
     }
-
-    let formattedKey = privateKey;
-    
-    // Replace escaped newlines with actual newlines
-    if (privateKey.includes('\\n')) {
-      formattedKey = privateKey.replace(/\\n/g, '\n');
-    }
-    
-    // Ensure the key has the proper header and footer if they're missing
-    if (!formattedKey.includes('-----BEGIN PRIVATE KEY-----')) {
-      formattedKey = `-----BEGIN PRIVATE KEY-----\n${formattedKey}\n-----END PRIVATE KEY-----`;
-    }
-    
-    console.log('Private key format prepared for JWT');
-
-    const jwt = new JWT({
-      email: clientEmail,
-      key: formattedKey,
-      scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-    });
-
-    console.log('JWT created, loading spreadsheet info');
-    const doc = new GoogleSpreadsheet(sheetId, jwt);
-    await doc.loadInfo();
-    console.log(`Spreadsheet loaded: ${doc.title}, sheets: ${Object.keys(doc.sheetsByTitle).join(', ')}`);
-    return doc;
   } catch (error) {
     console.error("Error initializing Google Sheets:", error);
     if (error instanceof Error) {
